@@ -416,8 +416,9 @@ test("按这一拍开始时的距离移动", () => {
   const left = spot(cooperators, "alwaysCooperate#1");
   const right = spot(cooperators, "alwaysCooperate#2");
   step(cooperators);
-  closeTo(spot(cooperators, "alwaysCooperate#1"), shift(left, right, 0.2));
-  closeTo(spot(cooperators, "alwaysCooperate#2"), shift(right, left, 0.2));
+  const approached = normalizePositions([shift(left, right, 0.2), shift(right, left, 0.2)]);
+  closeTo(spot(cooperators, "alwaysCooperate#1"), approached[0] ?? left);
+  closeTo(spot(cooperators, "alwaysCooperate#2"), approached[1] ?? right);
 
   const defectors = createTftWorld({
     counts: { alwaysDefect: 2 },
@@ -429,8 +430,9 @@ test("按这一拍开始时的距离移动", () => {
   const stillLeft = spot(defectors, "alwaysDefect#1");
   const stillRight = spot(defectors, "alwaysDefect#2");
   step(defectors);
-  closeTo(spot(defectors, "alwaysDefect#1"), stillLeft);
-  closeTo(spot(defectors, "alwaysDefect#2"), stillRight);
+  const stayed = normalizePositions([stillLeft, stillRight]);
+  closeTo(spot(defectors, "alwaysDefect#1"), stayed[0] ?? stillLeft);
+  closeTo(spot(defectors, "alwaysDefect#2"), stayed[1] ?? stillRight);
 
   const split = createTftWorld({
     counts: { alwaysCooperate: 1, alwaysDefect: 1 },
@@ -442,8 +444,9 @@ test("按这一拍开始时的距离移动", () => {
   const cooperator = spot(split, "alwaysCooperate#1");
   const defector = spot(split, "alwaysDefect#1");
   step(split);
-  closeTo(spot(split, "alwaysCooperate#1"), shift(cooperator, defector, -0.45));
-  closeTo(spot(split, "alwaysDefect#1"), shift(defector, cooperator, 0.15));
+  const parted = normalizePositions([shift(cooperator, defector, -0.45), shift(defector, cooperator, 0.15)]);
+  closeTo(spot(split, "alwaysCooperate#1"), parted[0] ?? cooperator);
+  closeTo(spot(split, "alwaysDefect#1"), parted[1] ?? defector);
 
   const cling = createTftWorld({
     counts: { alwaysCooperate: 1, alwaysDefect: 1 },
@@ -456,8 +459,9 @@ test("按这一拍开始时的距离移动", () => {
   const bitten = spot(cling, "alwaysCooperate#1");
   const biter = spot(cling, "alwaysDefect#1");
   step(cling);
-  closeTo(spot(cling, "alwaysCooperate#1"), shift(bitten, biter, 0.2));
-  closeTo(spot(cling, "alwaysDefect#1"), shift(biter, bitten, 0.15));
+  const clung = normalizePositions([shift(bitten, biter, 0.2), shift(biter, bitten, 0.15)]);
+  closeTo(spot(cling, "alwaysCooperate#1"), clung[0] ?? bitten);
+  closeTo(spot(cling, "alwaysDefect#1"), clung[1] ?? biter);
 
   const born = createTftWorld({
     counts: { alwaysCooperate: 2, alwaysDefect: 2 },
@@ -490,6 +494,27 @@ test("按这一拍开始时的距离移动", () => {
     );
     assert.ok(nearestParent <= birthReach + 1e-9);
   }
+});
+
+test("淘汰人数是 0 时仍按间隔把坐标缩放到固定尺度", () => {
+  const world = createTftWorld({
+    counts: { alwaysCooperate: 2 },
+    every: 1,
+    eliminate: 0,
+    seed: 1,
+    near: 1,
+    ...still,
+  });
+  park(world, "alwaysCooperate#1", 0);
+  park(world, "alwaysCooperate#2", 40);
+  step(world);
+  assert.equal(listEntities(world).every((entity) => entity.attrs.score === 3), true);
+  step(world);
+  closeTo(spot(world, "alwaysCooperate#1"), { x: -1, y: 0 });
+  closeTo(spot(world, "alwaysCooperate#2"), { x: 1, y: 0 });
+  assert.equal(listEntities(world).length, 2);
+  assert.equal(listEntities(world).every((entity) => entity.attrs.score === 3), true);
+  assert.equal(listRelations(world).length, 2);
 });
 
 test("繁衍时把坐标缩放到固定尺度，重叠的人放到原点", () => {
