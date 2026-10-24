@@ -58,6 +58,8 @@ export interface TftParams {
   flee?: number;
   /** 每人挑选的最近对手占其他人的比例。名额向下取整。缺省 1/3。 */
   near?: number;
+  /** 从最近名额剩下的对手里再随机抽的比例。名额向下取整。缺省 0。 */
+  stray?: number;
   /** 爆发者回看的最近次数。缺省 5。 */
   window?: number;
   /** 爆发者在回看里要达到的背叛次数。缺省 3。 */
@@ -162,6 +164,7 @@ export const defaultTftParams: TftParams = {
   follow: 0.15,
   flee: 0.45,
   near: 1 / 3,
+  stray: 0,
   window: defaultBurstWindow,
   strikes: defaultBurstStrikes,
 };
@@ -228,8 +231,8 @@ export function tftIntro(params: TftParams): string {
     `以牙还牙。初始人数：${roster}。`,
     `每 ${params.every} 拍开始繁衍一次：淘汰当时得分最低的 ${params.eliminate} 人，再从剩下的人里抽亲代，补回同样人数的纯策略。种子 ${params.seed}。`,
     "抽亲代时先减去存活者都有的那一截分数。最低的人留 1 份，每高出 1 分再多 1 份，然后按份数归一化。",
-    `繁殖这一拍不再对局。淘汰和新生儿到下一拍开始才入场。落地后所有人只留下策略，关系和得分都清空。这一拍把存活者平移、缩放到离中心最远的人为 1，方向和距离比例保持不变。新生儿落在亲代旁边，距离不超过这个尺度的 ${formatRatio(birthReach)}。只剩一种策略时提前结束。到了繁衍淘汰那一拍，最高分和最低分的差距不超过最高分的死区比例时也提前结束。`,
-    `每人在普通拍只和当时离自己最近的一部分人打。这部分是其他人的 ${formatRatio(inputNear(params))}，名额向下取整。为 0 时这一拍不打。只要有一方把对方算进名额，两人就打。都合作各得 3，都背叛各得 1，单方背叛时背叛者得 5、合作者得 0。`,
+    `每一拍结束时，把所有还在场的人平移、缩放到离中心最远的人为 1，方向和距离比例保持不变。到点这一拍不再对局。淘汰人数是 0 时，人不淘汰、不出生，关系和得分都留着。淘汰人数大于 0 时，再淘汰和补人；落地后所有人只留下策略，关系和得分都清空。新生儿落在亲代旁边，距离不超过这个尺度的 ${formatRatio(birthReach)}。只剩一种策略时提前结束。到了这一拍，最高分和最低分的差距不超过最高分的死区比例时也提前结束。`,
+    `每人在普通拍先和当时离自己最近的一部分人打。这部分是其他人的 ${formatRatio(inputNear(params))}，名额向下取整。再从剩下的人里按 ${formatRatio(inputStray(params))} 随机抽，名额同样向下取整，不管他们离多远。两边的名额都是 0 时这一拍不打。只要有一方把对方算进来，两人就打。都合作各得 3，都背叛各得 1，单方背叛时背叛者得 5、合作者得 0。`,
     `同质化看上一拍见过的人里，合作占多少，达到 ${formatRatio(inputRatio(params))} 才合作。比例越低越乐观，越高越悲观。没有记录时合作。`,
     `爆发者对同一个人，最近 ${inputWindow(params)} 次里被背叛达到 ${inputStrikes(params)} 次，之后只对这个人背叛。`,
     `每个出牌决定有 ${formatRatio(inputFlip(params))} 的概率翻成相反的一手。记下来的是实际打出的那一手。`,
@@ -280,6 +283,8 @@ export function normalizeTftParams(input: TftParams): TftParams {
   if (!Number.isFinite(dead) || dead < 0 || dead > 1) throw new Error("分数死区要是 0 到 1 之间的比例");
   const near = inputNear(input);
   if (!Number.isFinite(near) || near < 0 || near > 1) throw new Error("最近对手的比例要在 0 和 1 之间");
+  const stray = inputStray(input);
+  if (!Number.isFinite(stray) || stray < 0 || stray > 1) throw new Error("意外相遇的比例要在 0 和 1 之间");
   const window = inputWindow(input);
   const strikes = inputStrikes(input);
   if (!Number.isInteger(window) || window < 1) throw new Error("爆发者回看的次数要是正整数");
@@ -303,6 +308,7 @@ export function normalizeTftParams(input: TftParams): TftParams {
     flip,
     dead,
     near,
+    stray,
     window,
     strikes,
     ...space,
@@ -326,23 +332,43 @@ export function nearestCount(population: number, near = 1 / 3): number {
   return Math.min(population - 1, Math.floor((population - 1) * near + 1e-9));
 }
 
+/** 最近名额之外再随机抽的人数。比例 stray 乘的是剩下的对手，名额向下取整。 */
+export function strayCount(population: number, near = 1 / 3, stray = 0): number {
+  if (population <= 1 || stray <= 0) return 0;
+  const rest = population - 1 - nearestCount(population, near);
+  if (rest <= 0) return 0;
+  return Math.min(rest, Math.floor(rest * stray + 1e-9));
+}
+
 function pairKey(left: string, right: string): string {
   return compareText(left, right) <= 0 ? `${left}\0${right}` : `${right}\0${left}`;
 }
 
-function meetingKeys(people: readonly { id: string; attrs: Readonly<Attrs> }[], near: number): Set<string> {
+function meetingKeys(
+  people: readonly { id: string; attrs: Readonly<Attrs> }[],
+  near: number,
+  stray: number,
+  seed: number,
+  tick: number,
+): Set<string> {
   const points = people.map((person) => ({ id: person.id, x: coordOf(person.attrs.x), y: coordOf(person.attrs.y) }));
   const quota = nearestCount(points.length, near);
+  const extra = strayCount(points.length, near, stray);
   const meetings = new Set<string>();
   for (const person of points) {
-    const nearest = points
+    const others = points
       .filter((other) => other.id !== person.id)
       .sort((a, b) => {
         const gap = Math.hypot(a.x - person.x, a.y - person.y) - Math.hypot(b.x - person.x, b.y - person.y);
         return gap !== 0 ? gap : compareText(a.id, b.id);
-      })
-      .slice(0, quota);
-    for (const other of nearest) meetings.add(pairKey(person.id, other.id));
+      });
+    for (const other of others.slice(0, quota)) meetings.add(pairKey(person.id, other.id));
+    const drawn = others
+      .slice(quota)
+      .map((other) => ({ id: other.id, roll: unitRandom(seed, [tick, person.id, other.id, "stray"]) }))
+      .sort((a, b) => a.roll - b.roll || compareText(a.id, b.id))
+      .slice(0, extra);
+    for (const other of drawn) meetings.add(pairKey(person.id, other.id));
   }
   return meetings;
 }
@@ -353,13 +379,19 @@ function playRule(params: TftParams): WorldRule {
     run(ctx) {
       if (isSelectionTick(ctx.tick, params.every)) return;
       const people = ctx.world.entities();
-      const meetings = meetingKeys(people, inputNear(params));
+      const meetings = meetingKeys(people, inputNear(params), inputStray(params), ctx.seed, ctx.tick);
       const outside = outsideTreatment(people, (from, to) => ctx.world.relation(from, to).attrs, ctx.tick);
       const ratio = inputRatio(params);
       const window = inputWindow(params);
       const strikes = inputStrikes(params);
       const flip = inputFlip(params);
       const space = spaceOf(params);
+      const movedX = new Map<string, number>();
+      const movedY = new Map<string, number>();
+      const pushMove = (id: string, x: number, y: number) => {
+        movedX.set(id, (movedX.get(id) ?? 0) + x);
+        movedY.set(id, (movedY.get(id) ?? 0) + y);
+      };
       for (let i = 0; i < people.length; i += 1) {
         for (let j = i + 1; j < people.length; j += 1) {
           const left = people[i];
@@ -387,13 +419,22 @@ function playRule(params: TftParams): WorldRule {
           const leftY = coordOf(left.attrs.y);
           const rightX = coordOf(right.attrs.x);
           const rightY = coordOf(right.attrs.y);
-          left.add("x", (rightX - leftX) * leftScale);
-          left.add("y", (rightY - leftY) * leftScale);
-          right.add("x", (leftX - rightX) * rightScale);
-          right.add("y", (leftY - rightY) * rightScale);
+          pushMove(left.id, (rightX - leftX) * leftScale, (rightY - leftY) * leftScale);
+          pushMove(right.id, (leftX - rightX) * rightScale, (leftY - rightY) * rightScale);
           remember(ctx.world.relation(left.id, right.id), leftMemory, leftMove, rightMove, leftKind.id === "burster", ctx.tick);
           remember(ctx.world.relation(right.id, left.id), rightMemory, rightMove, leftMove, rightKind.id === "burster", ctx.tick);
         }
+      }
+      const fitted = normalizePositions(people.map((person) => ({
+        x: coordOf(person.attrs.x) + (movedX.get(person.id) ?? 0),
+        y: coordOf(person.attrs.y) + (movedY.get(person.id) ?? 0),
+      })));
+      for (let i = 0; i < people.length; i += 1) {
+        const person = people[i];
+        const spot = fitted[i];
+        if (!person || !spot) continue;
+        person.set("x", spot.x);
+        person.set("y", spot.y);
       }
     },
   };
@@ -403,8 +444,12 @@ function selectRule(params: TftParams): WorldRule {
   return {
     name: "select",
     run(ctx) {
-      if (!isSelectionTick(ctx.tick, params.every) || params.eliminate === 0) return;
+      if (!isSelectionTick(ctx.tick, params.every)) return;
       const people = ctx.world.entities();
+      if (params.eliminate === 0) {
+        placeNormalized(people);
+        return;
+      }
       if (people.length <= params.eliminate) {
         throw new Error(`人数 ${people.length} 不够淘汰 ${params.eliminate} 人`);
       }
@@ -412,14 +457,7 @@ function selectRule(params: TftParams): WorldRule {
       const doomed = ranked.slice(0, params.eliminate);
       const survivors = ranked.slice(params.eliminate).sort((a, b) => compareText(a.id, b.id));
       for (const entity of doomed) ctx.remove(entity.id);
-      const fitted = normalizePositions(survivors.map((entity) => ({ x: coordOf(entity.attrs.x), y: coordOf(entity.attrs.y) })));
-      for (let i = 0; i < survivors.length; i += 1) {
-        const entity = survivors[i];
-        const spot = fitted[i];
-        if (!entity || !spot) continue;
-        entity.set("x", spot.x);
-        entity.set("y", spot.y);
-      }
+      const fitted = placeNormalized(survivors);
       const used = new Set(people.map((entity) => entity.id));
       const weights = spreadWeights(survivors.map((entity) => scoreOf(entity.attrs.score)));
       for (let n = 0; n < doomed.length; n += 1) {
@@ -438,6 +476,18 @@ function selectRule(params: TftParams): WorldRule {
       ctx.clearRelations();
     },
   };
+}
+
+function placeNormalized(people: readonly { id: string; attrs: Readonly<Attrs>; set: (key: string, value: string | number) => void }[]): { x: number; y: number }[] {
+  const fitted = normalizePositions(people.map((entity) => ({ x: coordOf(entity.attrs.x), y: coordOf(entity.attrs.y) })));
+  for (let i = 0; i < people.length; i += 1) {
+    const entity = people[i];
+    const spot = fitted[i];
+    if (!entity || !spot) continue;
+    entity.set("x", spot.x);
+    entity.set("y", spot.y);
+  }
+  return fitted;
 }
 
 function isSelectionTick(tick: number, every: number): boolean {
@@ -529,6 +579,10 @@ function inputNear(params: Pick<TftParams, "near">): number {
   return params.near ?? defaultTftParams.near ?? 1 / 3;
 }
 
+function inputStray(params: Pick<TftParams, "stray">): number {
+  return params.stray ?? defaultTftParams.stray ?? 0;
+}
+
 function inputWindow(params: Pick<TftParams, "window">): number {
   return params.window ?? defaultTftParams.window ?? defaultBurstWindow;
 }
@@ -555,7 +609,7 @@ function motionSentence(params: TftParams): string {
   const space = spaceOf(params);
   return [
     `靠近系数 ${formatRatio(space.approach)}，共存系数 ${formatRatio(space.coexist)}，跟随系数 ${formatRatio(space.follow)}，远离系数 ${formatRatio(space.flee)}。`,
-    "走的距离是这一拍开始时两人的距离乘上对应系数。只有这一拍真正对上的人才会走动。合作时各自走近，互相背叛时也按共存系数走近。单方面背叛时，被背叛的人走开，背叛的人跟着走近。系数为负时方向相反。",
+    "走的距离是这一拍开始时两人的距离乘上对应系数。走完后把所有人平移、缩放到离中心最远的人为 1。只有这一拍真正对上的人才会走动。合作时各自走近，互相背叛时也按共存系数走近。单方面背叛时，被背叛的人走开，背叛的人跟着走近。系数为负时方向相反。",
   ].join("");
 }
 
@@ -753,11 +807,11 @@ export function tftRankingNote(params: TftParams, plannedTicks: number, endedAt:
   return [
     `初始人数：${describeCounts(params)}。`,
     `每 ${params.every} 拍繁衍一次，淘汰当时得分最低的 ${params.eliminate} 人，再按扣掉共同分数后的份数抽亲代。种子 ${params.seed}。`,
-    "繁衍这一拍把存活者平移、缩放到离中心最远的人为 1，新生儿落在亲代旁边。",
+    "每一拍都把还在场的人平移、缩放到离中心最远的人为 1。淘汰人数是 0 时不淘汰、不出生。有淘汰时，新生儿落在亲代旁边。",
     `同质化的判断比例是 ${formatRatio(inputRatio(params))}，上一拍见过的人里合作占比达到它才合作。`,
     `每个出牌决定有 ${formatRatio(inputFlip(params))} 的概率翻成相反的一手。`,
     `分数死区是最高分的 ${formatRatio(inputDead(params))}。繁衍那一拍最高分减最低分不超过它，就当作分数相同。`,
-    `最近对手的比例是 ${formatRatio(inputNear(params))}，名额按其他人的人数向下取整。`,
+    `最近对手的比例是 ${formatRatio(inputNear(params))}，名额按其他人的人数向下取整。意外相遇再从剩下的人里随机抽 ${formatRatio(inputStray(params))}。`,
     `爆发者对同一个人，最近 ${inputWindow(params)} 次里被背叛达到 ${inputStrikes(params)} 次，之后只对这个人背叛。`,
     motionSentence(params),
     `计划跑 ${plannedTicks} 拍，排名取第 ${endedAt} 拍开始时的人数。`,
