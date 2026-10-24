@@ -1,9 +1,7 @@
 import { listEntities, listRelations, step, type Value, type World } from "./world.ts";
-import { buildDemoWorld } from "./demo.ts";
-import { createTftWorld, defaultTftParams, rankCounts, rememberCounts, sameScoresAtSelection, tftCategories, tftIntro, tftRankingNote, type CountMark, type TftParams } from "./tft.ts";
+import { createTftWorld, defaultTftParams, formatPopulationSpacing, populationSpacing, rankCounts, rememberCounts, sameScoresAtSelection, tftCategories, tftIntro, tftRankingNote, type CountMark, type TftParams } from "./tft.ts";
 
 interface Options {
-  world: "demo" | "tft";
   ticks?: number;
   every?: number;
   eliminate?: number;
@@ -12,35 +10,39 @@ interface Options {
   ratio?: number;
   flip?: number;
   dead?: number;
+  approach?: number;
+  coexist?: number;
+  follow?: number;
+  flee?: number;
+  near?: number;
+  window?: number;
+  strikes?: number;
   overrides: { key: string; count: number }[];
 }
 
-const demoIntro = [
-  "每一拍先冻结实体和关系，再让每个策略各跑一次，最后一起落地。",
-  "打印的是每一拍开始时的世界。这一拍写出的修改，要到下一拍开始才出现。",
-  "alice 和 bob 每拍各让 prey 的体力 -1，两笔在落地时相加。",
-  "alice 在第 0 拍写下 wave。bob 在第 1 拍开始时读到它，heard 出现在第 2 拍开始。",
-  "prey 要到某一拍开始时体力已经 <= 0，才在这一拍结束时离场。",
-].join("\n");
-
 function parseOptions(argv: string[]): Options {
-  const options: Options = { world: "tft", overrides: [] };
+  const options: Options = { overrides: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
       console.log([
         "用法:",
         "  npm start -- --ticks 12",
-        "  npm start -- --world demo",
-        "  npm start -- --world tft --every 5 --eliminate 8 --count 3 --seed 1",
+        "  npm start -- --every 5 --eliminate 8 --count 3 --seed 1",
         "  npm start -- --n 1=5 --n tft=2",
         "  npm start -- --ratio 0.3",
         "  npm start -- --flip 0.05",
         "  npm start -- --dead 0.05",
+        "  npm start -- --approach 0.2 --coexist 0 --follow 0.15 --flee 0.45",
+        "  npm start -- --near 1/3",
+        "  npm start -- --window 5 --strikes 3",
         "",
         "--ratio 是同质化的判断比例，取 0 到 1，也可以写成分数。合作占比达到它才合作。越低越乐观，越高越悲观。默认 0.5。",
         "--flip 是每个出牌决定被翻转的概率，取 0 到 1，也可以写成分数。默认 0。",
         "--dead 是分数死区，取 0 到 1，也可以写成分数。繁衍那一拍最高分减最低分不超过最高分的这个比例，就当作分数相同并提前结束。默认 0。",
+        "--approach、--coexist、--follow、--flee 是位置系数，可以是负数。正数沿原来的方向走，负数反过来。默认靠近 0.2、共存 0、跟随 0.15、远离 0.45。",
+        "--near 是每人挑选的最近对手占其他人的比例，取 0 到 1，也可以写成分数。名额向下取整，为 0 时这一拍不打。默认 1/3。",
+        "--window 是爆发者回看的最近次数，--strikes 是其中要达到的背叛次数。都是正整数，背叛次数不能大于回看次数。默认 5 和 3。",
         "",
         "类别从 1 开始，也可以写 id：",
         tftCategories.map((category, index) => `  ${index + 1} ${category.id} ${category.label}`).join("\n"),
@@ -57,12 +59,6 @@ function parseOptions(argv: string[]): Options {
       if (arg?.startsWith(`${name}=`)) return arg.slice(name.length + 1);
       return "";
     };
-    if (arg === "--world" || arg?.startsWith("--world=")) {
-      const value = read("--world");
-      if (value !== "demo" && value !== "tft") throw new Error("--world 只能是 tft 或 demo");
-      options.world = value;
-      continue;
-    }
     if (arg === "--ticks" || arg?.startsWith("--ticks=")) {
       options.ticks = nonNegativeInt(read("--ticks"), "--ticks");
       continue;
@@ -91,6 +87,34 @@ function parseOptions(argv: string[]): Options {
       options.dead = unitArg(read("--dead"), "--dead");
       continue;
     }
+    if (arg === "--approach" || arg?.startsWith("--approach=")) {
+      options.approach = numberArg(read("--approach"), "--approach");
+      continue;
+    }
+    if (arg === "--coexist" || arg?.startsWith("--coexist=")) {
+      options.coexist = numberArg(read("--coexist"), "--coexist");
+      continue;
+    }
+    if (arg === "--follow" || arg?.startsWith("--follow=")) {
+      options.follow = numberArg(read("--follow"), "--follow");
+      continue;
+    }
+    if (arg === "--flee" || arg?.startsWith("--flee=")) {
+      options.flee = numberArg(read("--flee"), "--flee");
+      continue;
+    }
+    if (arg === "--near" || arg?.startsWith("--near=")) {
+      options.near = unitArg(read("--near"), "--near");
+      continue;
+    }
+    if (arg === "--window" || arg?.startsWith("--window=")) {
+      options.window = positiveInt(read("--window"), "--window");
+      continue;
+    }
+    if (arg === "--strikes" || arg?.startsWith("--strikes=")) {
+      options.strikes = positiveInt(read("--strikes"), "--strikes");
+      continue;
+    }
     if (arg === "--count" || arg?.startsWith("--count=")) {
       options.count = nonNegativeInt(read("--count"), "--count");
       continue;
@@ -110,6 +134,18 @@ function parseOptions(argv: string[]): Options {
 function nonNegativeInt(raw: string, name: string): number {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) throw new Error(`${name} 要是非负整数`);
+  return value;
+}
+
+function positiveInt(raw: string, name: string): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} 要是正整数`);
+  return value;
+}
+
+function numberArg(raw: string, name: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`${name} 要是数字`);
   return value;
 }
 
@@ -147,6 +183,13 @@ function tftParams(options: Options): TftParams {
     ratio: options.ratio ?? defaultTftParams.ratio,
     flip: options.flip ?? defaultTftParams.flip,
     dead: options.dead ?? defaultTftParams.dead,
+    approach: options.approach ?? defaultTftParams.approach,
+    coexist: options.coexist ?? defaultTftParams.coexist,
+    follow: options.follow ?? defaultTftParams.follow,
+    flee: options.flee ?? defaultTftParams.flee,
+    near: options.near ?? defaultTftParams.near,
+    window: options.window ?? defaultTftParams.window,
+    strikes: options.strikes ?? defaultTftParams.strikes,
   };
 }
 
@@ -200,17 +243,6 @@ function printWorld(world: World): void {
 
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
-  if (options.world === "demo") {
-    const world = buildDemoWorld();
-    const ticks = options.ticks ?? 4;
-    console.log(demoIntro);
-    printWorld(world);
-    for (let i = 0; i < ticks; i += 1) {
-      step(world);
-      printWorld(world);
-    }
-    return;
-  }
   const params = tftParams(options);
   const world = createTftWorld(params);
   const ticks = options.ticks ?? 12;
@@ -239,7 +271,7 @@ function main(): void {
     printWorld(world);
   }
   if (stopMessage) console.log(`\n${stopMessage}`);
-  printRanking(marks, params, ticks, world.tick);
+  printRanking(world, marks, params, ticks, world.tick);
 }
 
 function strategyCounts(world: World): { order: number; label: string; count: number }[] {
@@ -255,7 +287,7 @@ function strategyCounts(world: World): { order: number; label: string; count: nu
   return [...groups.entries()].map(([order, group]) => ({ order, label: group.label, count: group.count }));
 }
 
-function printRanking(marks: CountMark[], params: TftParams, plannedTicks: number, endedAt: number): void {
+function printRanking(world: World, marks: CountMark[], params: TftParams, plannedTicks: number, endedAt: number): void {
   const ranked = rankCounts(marks);
   if (ranked.length === 0) return;
   console.log("\n最终人数排名");
@@ -264,6 +296,7 @@ function printRanking(marks: CountMark[], params: TftParams, plannedTicks: numbe
   ranked.forEach((row, index) => {
     console.log(`  ${index + 1}  ${row.label}  ${row.count} 人  第 ${row.updatedAt} 拍更新到这个人数`);
   });
+  console.log(`\n${formatPopulationSpacing(populationSpacing(listEntities(world)))}`);
 }
 
 try {

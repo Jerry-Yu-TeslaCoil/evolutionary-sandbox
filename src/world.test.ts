@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildDemoWorld } from "./demo.ts";
 import {
   addEntity,
   createWorld,
@@ -189,23 +188,4 @@ test("清空关系时，这一拍结束不留下任何关系", () => {
   step(world);
   assert.equal(entity(world, "a")?.attrs.score, 4);
   assert.deepEqual(listRelations(world), []);
-});
-
-test("示例世界里体力相加、关系延迟可见、体力耗尽后离场", () => {
-  const world = buildDemoWorld();
-  step(world);
-  assert.equal(entity(world, "prey")?.attrs.energy, 2);
-  assert.equal(entity(world, "bob")?.attrs.heard, undefined);
-  assert.equal(listRelations(world)[0]?.attrs.wave, "alice");
-  assert.equal(listRelations(world)[0]?.attrs.pressure, 2);
-
-  step(world);
-  assert.equal(entity(world, "bob")?.attrs.heard, "alice");
-  assert.equal(entity(world, "prey")?.attrs.energy, 0);
-  assert.equal(listRelations(world)[0]?.attrs.pressure, 4);
-
-  step(world);
-  assert.equal(entity(world, "prey"), undefined);
-  assert.equal(listEntities(world).map((item) => item.id).join(","), "alice,bob");
-  assert.equal(listRelations(world)[0]?.attrs.pressure, 6);
 });
