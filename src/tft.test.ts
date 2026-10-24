@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createTftWorld, defaultTftParams, flipMove, moveOf, rankCounts, rememberCounts, sameScoresAtSelection, spreadWeights, tftRankingNote } from "./tft.ts";
+import { birthReach, createTftWorld, defaultTftParams, flipMove, formatPopulationSpacing, moveOf, nearestCount, normalizePositions, populationSpacing, rankCounts, rememberCounts, sameScoresAtSelection, spreadWeights, tftRankingNote } from "./tft.ts";
 import { listEntities, listRelations, step, type World } from "./world.ts";
 
 test("常见出法按各自的规则决定下一手", () => {
@@ -53,6 +53,7 @@ test("会原谅的以牙还牙照抄上一手，被背叛时有时仍合作", ()
     every: 30,
     eliminate: 1,
     seed: 1,
+    near: 1,
   });
   const moves: string[] = [];
   for (let i = 0; i < 12; i += 1) {
@@ -69,6 +70,7 @@ test("会原谅的以牙还牙照抄上一手，被背叛时有时仍合作", ()
     every: 10,
     eliminate: 1,
     seed: 1,
+    near: 1,
   });
   step(calm);
   step(calm);
@@ -76,32 +78,48 @@ test("会原谅的以牙还牙照抄上一手，被背叛时有时仍合作", ()
   assert.equal(played(calm, "forgivingTft#1", "alwaysCooperate#1"), "C");
 });
 
-test("同质化把上一拍所有人的对待加总，开局和平局都合作", () => {
+test("同质化只加总上一拍见过的对待，开局和平局都合作", () => {
   const tied = createTftWorld({
-    counts: { homogenized: 1, alwaysCooperate: 1, alwaysDefect: 1 },
+    counts: { homogenized: 1, alwaysCooperate: 1, alwaysDefect: 1, tft: 2 },
     every: 10,
     eliminate: 1,
     seed: 1,
+    near: 1 / 2,
+    ...still,
   });
+  park(tied, "homogenized#1", 0);
+  park(tied, "alwaysCooperate#1", 1);
+  park(tied, "alwaysDefect#1", 3);
+  park(tied, "tft#1", 100);
+  park(tied, "tft#2", 101);
   step(tied);
   assert.equal(played(tied, "homogenized#1", "alwaysCooperate#1"), "C");
   assert.equal(played(tied, "homogenized#1", "alwaysDefect#1"), "C");
+  assert.equal(played(tied, "homogenized#1", "tft#1"), undefined);
   step(tied);
   assert.equal(played(tied, "homogenized#1", "alwaysCooperate#1"), "C");
   assert.equal(played(tied, "homogenized#1", "alwaysDefect#1"), "C");
 
   const hostile = createTftWorld({
-    counts: { homogenized: 1, alwaysDefect: 2 },
+    counts: { homogenized: 1, alwaysDefect: 2, tft: 2 },
     every: 10,
     eliminate: 1,
     seed: 1,
+    near: 1 / 2,
+    ...still,
   });
+  park(hostile, "homogenized#1", 0);
+  park(hostile, "alwaysDefect#1", 1);
+  park(hostile, "alwaysDefect#2", 2);
+  park(hostile, "tft#1", 100);
+  park(hostile, "tft#2", 101);
   step(hostile);
   assert.equal(played(hostile, "homogenized#1", "alwaysDefect#1"), "C");
   assert.equal(played(hostile, "homogenized#1", "alwaysDefect#2"), "C");
   step(hostile);
   assert.equal(played(hostile, "homogenized#1", "alwaysDefect#1"), "D");
   assert.equal(played(hostile, "homogenized#1", "alwaysDefect#2"), "D");
+  assert.equal(played(hostile, "homogenized#1", "tft#1"), undefined);
 });
 
 test("同质化的判断比例可以改成更乐观或更悲观", () => {
@@ -110,24 +128,41 @@ test("同质化的判断比例可以改成更乐观或更悲观", () => {
   assert.equal(moveOf("homogenized", { ratio: 1 }), "C");
 
   const pessimistic = createTftWorld({
-    counts: { homogenized: 1, alwaysCooperate: 1, alwaysDefect: 1 },
+    counts: { homogenized: 1, alwaysCooperate: 1, alwaysDefect: 1, tft: 2 },
     every: 10,
     eliminate: 1,
     seed: 1,
     ratio: 0.7,
+    near: 1 / 2,
+    ...still,
   });
+  park(pessimistic, "homogenized#1", 0);
+  park(pessimistic, "alwaysCooperate#1", 1);
+  park(pessimistic, "alwaysDefect#1", 3);
+  park(pessimistic, "tft#1", 100);
+  park(pessimistic, "tft#2", 101);
   step(pessimistic);
   step(pessimistic);
   assert.equal(played(pessimistic, "homogenized#1", "alwaysCooperate#1"), "D");
   assert.equal(played(pessimistic, "homogenized#1", "alwaysDefect#1"), "D");
 
   const optimistic = createTftWorld({
-    counts: { homogenized: 1, alwaysCooperate: 1, alwaysDefect: 2 },
+    counts: { homogenized: 1, alwaysCooperate: 1, alwaysDefect: 2, tft: 4 },
     every: 10,
     eliminate: 1,
     seed: 1,
     ratio: 1 / 3,
+    near: 1 / 2,
+    ...still,
   });
+  park(optimistic, "homogenized#1", 0);
+  park(optimistic, "alwaysCooperate#1", 1);
+  park(optimistic, "alwaysDefect#1", 2);
+  park(optimistic, "alwaysDefect#2", 3);
+  park(optimistic, "tft#1", 100);
+  park(optimistic, "tft#2", 101);
+  park(optimistic, "tft#3", 200);
+  park(optimistic, "tft#4", 201);
   step(optimistic);
   step(optimistic);
   assert.equal(played(optimistic, "homogenized#1", "alwaysCooperate#1"), "C");
@@ -137,11 +172,18 @@ test("同质化的判断比例可以改成更乐观或更悲观", () => {
 
 test("爆发者对同一个人最近 5 次里被背叛达到 3 次后永远背叛", () => {
   const world = createTftWorld({
-    counts: { burster: 1, alwaysDefect: 1, alwaysCooperate: 1 },
+    counts: { burster: 1, alwaysDefect: 1, alwaysCooperate: 1, tft: 2 },
     every: 20,
     eliminate: 1,
     seed: 1,
+    near: 1 / 2,
+    ...still,
   });
+  park(world, "burster#1", 0);
+  park(world, "alwaysDefect#1", 1);
+  park(world, "alwaysCooperate#1", 2);
+  park(world, "tft#1", 100);
+  park(world, "tft#2", 101);
   step(world);
   step(world);
   step(world);
@@ -161,6 +203,26 @@ test("爆发者对同一个人最近 5 次里被背叛达到 3 次后永远背�
   step(world);
   assert.equal(played(world, "burster#1", "alwaysDefect#1"), "D");
   assert.equal(played(world, "burster#1", "alwaysCooperate#1"), "C");
+});
+
+test("爆发者的回看次数和背叛次数可以改", () => {
+  assert.equal(moveOf("burster", { recent: "D", burstWindow: 4, burstStrikes: 2 }), "C");
+  assert.equal(moveOf("burster", { recent: "CDCD", burstWindow: 4, burstStrikes: 2 }), "D");
+  assert.equal(moveOf("burster", { recent: "DDDCC", burstWindow: 3, burstStrikes: 2 }), "C");
+
+  const world = createTftWorld({
+    counts: { burster: 1, alwaysDefect: 1 },
+    every: 10,
+    eliminate: 1,
+    seed: 1,
+    near: 1,
+    window: 2,
+    strikes: 1,
+  });
+  step(world);
+  assert.equal(played(world, "burster#1", "alwaysDefect#1"), "C");
+  step(world);
+  assert.equal(played(world, "burster#1", "alwaysDefect#1"), "D");
 });
 
 test("同人数时，更晚变成这个人数的排在上面", () => {
@@ -214,6 +276,7 @@ test("结论排名写上这次运行的参数", () => {
   assert.match(mixed, /判断比例是 0\.3/);
   assert.match(mixed, /0\.05 的概率/);
   assert.match(mixed, /分数死区是最高分的 0\.05/);
+  assert.match(mixed, /最近对手的比例是 0\.333333/);
   assert.match(mixed, /计划跑 30 拍，排名取第 10 拍开始时的人数/);
 
   const even = tftRankingNote(defaultTftParams, 12, 12);
@@ -221,6 +284,8 @@ test("结论排名写上这次运行的参数", () => {
   assert.match(even, /判断比例是 0\.5/);
   assert.match(even, /0 的概率/);
   assert.match(even, /分数死区是最高分的 0/);
+  assert.match(even, /最近对手的比例是 0\.333333/);
+  assert.match(even, /最近 5 次里被背叛达到 3 次/);
 });
 
 test("每个出牌决定按给定概率翻转，记下来的是实际打出的那一手", () => {
@@ -234,6 +299,7 @@ test("每个出牌决定按给定概率翻转，记下来的是实际打出的�
     eliminate: 1,
     seed: 1,
     flip: 1,
+    near: 1,
   });
   step(flipped);
   assert.equal(played(flipped, "alwaysCooperate#1", "alwaysCooperate#2"), "D");
@@ -249,6 +315,7 @@ test("每个出牌决定按给定概率翻转，记下来的是实际打出的�
     eliminate: 1,
     seed: 1,
     flip: 0,
+    near: 1,
   });
   step(steady);
   const scores = Object.fromEntries(listEntities(steady).map((entity) => [entity.attrs.kind, entity.attrs.score]));
@@ -261,6 +328,7 @@ test("以牙还牙第一次被背叛，下一拍才还手", () => {
     every: 10,
     eliminate: 1,
     seed: 1,
+    near: 1,
   });
   step(world);
   const afterFirst = Object.fromEntries(listEntities(world).map((entity) => [entity.attrs.kind, entity.attrs.score]));
@@ -277,6 +345,10 @@ test("一整轮打完后所有人分数相同，繁衍拍就判定为固定", ()
     eliminate: 1,
     seed: 1,
   });
+  park(tied, "tft#1", 0);
+  park(tied, "alwaysCooperate#1", 1);
+  park(tied, "tft#2", 100);
+  park(tied, "alwaysCooperate#2", 101);
   step(tied);
   assert.equal(sameScoresAtSelection(tied, 2), false);
   step(tied);
@@ -289,6 +361,7 @@ test("一整轮打完后所有人分数相同，繁衍拍就判定为固定", ()
     every: 2,
     eliminate: 1,
     seed: 1,
+    near: 1,
   });
   step(split);
   step(split);
@@ -311,13 +384,17 @@ test("繁殖拍不对局，下一拍只留下纯策略，关系和得分都清�
     eliminate: 2,
     seed: 1,
   });
+  park(world, "alwaysCooperate#1", 0);
+  park(world, "alwaysDefect#1", 1);
+  park(world, "alwaysCooperate#2", 50);
+  park(world, "alwaysDefect#2", 51);
   step(world);
   const before = listEntities(world).map((entity) => [entity.id, entity.attrs.kind, entity.attrs.score]);
   assert.deepEqual(before, [
-    ["alwaysCooperate#1", "alwaysCooperate", 3],
-    ["alwaysCooperate#2", "alwaysCooperate", 3],
-    ["alwaysDefect#1", "alwaysDefect", 11],
-    ["alwaysDefect#2", "alwaysDefect", 11],
+    ["alwaysCooperate#1", "alwaysCooperate", 0],
+    ["alwaysCooperate#2", "alwaysCooperate", 0],
+    ["alwaysDefect#1", "alwaysDefect", 5],
+    ["alwaysDefect#2", "alwaysDefect", 5],
   ]);
   step(world);
   const after = listEntities(world);
@@ -327,6 +404,183 @@ test("繁殖拍不对局，下一拍只留下纯策略，关系和得分都清�
   assert.equal(after.some((entity) => entity.id === "alwaysDefect#2"), true);
   assert.equal(listRelations(world).length, 0);
 });
+
+test("按这一拍开始时的距离移动", () => {
+  const cooperators = createTftWorld({
+    counts: { alwaysCooperate: 2 },
+    every: 10,
+    eliminate: 1,
+    seed: 1,
+    near: 1,
+  });
+  const left = spot(cooperators, "alwaysCooperate#1");
+  const right = spot(cooperators, "alwaysCooperate#2");
+  step(cooperators);
+  closeTo(spot(cooperators, "alwaysCooperate#1"), shift(left, right, 0.2));
+  closeTo(spot(cooperators, "alwaysCooperate#2"), shift(right, left, 0.2));
+
+  const defectors = createTftWorld({
+    counts: { alwaysDefect: 2 },
+    every: 10,
+    eliminate: 1,
+    seed: 1,
+    near: 1,
+  });
+  const stillLeft = spot(defectors, "alwaysDefect#1");
+  const stillRight = spot(defectors, "alwaysDefect#2");
+  step(defectors);
+  closeTo(spot(defectors, "alwaysDefect#1"), stillLeft);
+  closeTo(spot(defectors, "alwaysDefect#2"), stillRight);
+
+  const split = createTftWorld({
+    counts: { alwaysCooperate: 1, alwaysDefect: 1 },
+    every: 10,
+    eliminate: 1,
+    seed: 1,
+    near: 1,
+  });
+  const cooperator = spot(split, "alwaysCooperate#1");
+  const defector = spot(split, "alwaysDefect#1");
+  step(split);
+  closeTo(spot(split, "alwaysCooperate#1"), shift(cooperator, defector, -0.45));
+  closeTo(spot(split, "alwaysDefect#1"), shift(defector, cooperator, 0.15));
+
+  const cling = createTftWorld({
+    counts: { alwaysCooperate: 1, alwaysDefect: 1 },
+    every: 10,
+    eliminate: 1,
+    seed: 1,
+    flee: -0.2,
+    near: 1,
+  });
+  const bitten = spot(cling, "alwaysCooperate#1");
+  const biter = spot(cling, "alwaysDefect#1");
+  step(cling);
+  closeTo(spot(cling, "alwaysCooperate#1"), shift(bitten, biter, 0.2));
+  closeTo(spot(cling, "alwaysDefect#1"), shift(biter, bitten, 0.15));
+
+  const born = createTftWorld({
+    counts: { alwaysCooperate: 2, alwaysDefect: 2 },
+    every: 1,
+    eliminate: 2,
+    seed: 1,
+  });
+  park(born, "alwaysCooperate#1", 0);
+  park(born, "alwaysDefect#1", 1);
+  park(born, "alwaysCooperate#2", 50);
+  park(born, "alwaysDefect#2", 51);
+  step(born);
+  step(born);
+  const keptLeft = spot(born, "alwaysDefect#1");
+  const keptRight = spot(born, "alwaysDefect#2");
+  const middle = { x: (keptLeft.x + keptRight.x) / 2, y: (keptLeft.y + keptRight.y) / 2 };
+  closeTo(middle, { x: 0, y: 0 });
+  assert.ok(Math.abs(Math.hypot(keptLeft.x - middle.x, keptLeft.y - middle.y) - 1) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(keptRight.x - middle.x, keptRight.y - middle.y) - 1) < 1e-9);
+  const children = listEntities(born).filter((entity) => entity.id !== "alwaysDefect#1" && entity.id !== "alwaysDefect#2");
+  assert.equal(children.length, 2);
+  for (const child of children) {
+    const x = child.attrs.x;
+    const y = child.attrs.y;
+    assert.equal(typeof x, "number");
+    assert.equal(typeof y, "number");
+    const nearestParent = Math.min(
+      Math.hypot((x as number) - keptLeft.x, (y as number) - keptLeft.y),
+      Math.hypot((x as number) - keptRight.x, (y as number) - keptRight.y),
+    );
+    assert.ok(nearestParent <= birthReach + 1e-9);
+  }
+});
+
+test("繁衍时把坐标缩放到固定尺度，重叠的人放到原点", () => {
+  const fitted = normalizePositions([
+    { x: 1e10, y: 0 },
+    { x: 1e10 + 4, y: 0 },
+  ]);
+  closeTo(fitted[0] ?? { x: 0, y: 0 }, { x: -1, y: 0 });
+  closeTo(fitted[1] ?? { x: 0, y: 0 }, { x: 1, y: 0 });
+  const piled = normalizePositions([
+    { x: 5, y: 5 },
+    { x: 5, y: 5 },
+  ]);
+  closeTo(piled[0] ?? { x: 1, y: 1 }, { x: 0, y: 0 });
+  closeTo(piled[1] ?? { x: 1, y: 1 }, { x: 0, y: 0 });
+});
+
+test("每人只和最近的一部分人打，名额向下取整，对方算进来也会打", () => {
+  assert.equal(nearestCount(2, 1 / 3), 0);
+  assert.equal(nearestCount(3, 1 / 3), 0);
+  assert.equal(nearestCount(4, 1 / 3), 1);
+  assert.equal(nearestCount(5, 1 / 3), 1);
+  assert.equal(nearestCount(48, 1 / 3), 15);
+  assert.equal(nearestCount(5, 1), 4);
+  assert.equal(nearestCount(5, 0), 0);
+
+  const world = createTftWorld({
+    counts: { alwaysCooperate: 4 },
+    every: 10,
+    eliminate: 1,
+    seed: 1,
+    ...still,
+  });
+  park(world, "alwaysCooperate#1", 0);
+  park(world, "alwaysCooperate#2", 1);
+  park(world, "alwaysCooperate#3", 1.2);
+  park(world, "alwaysCooperate#4", 100);
+  step(world);
+  assert.equal(played(world, "alwaysCooperate#1", "alwaysCooperate#2"), "C");
+  assert.equal(played(world, "alwaysCooperate#2", "alwaysCooperate#3"), "C");
+  assert.equal(played(world, "alwaysCooperate#1", "alwaysCooperate#3"), undefined);
+  assert.equal(played(world, "alwaysCooperate#1", "alwaysCooperate#4"), undefined);
+});
+
+test("内聚是种群内部的平均距离，种群之间另算", () => {
+  const spacing = populationSpacing([
+    { id: "a", attrs: { order: 0, label: "甲", x: 0, y: 0 } },
+    { id: "b", attrs: { order: 0, label: "甲", x: 4, y: 0 } },
+    { id: "c", attrs: { order: 1, label: "乙", x: 0, y: 3 } },
+    { id: "d", attrs: { order: 1, label: "乙", x: 0, y: 3 } },
+  ]);
+  const jia = spacing.cohorts.find((row) => row.label === "甲");
+  const yi = spacing.cohorts.find((row) => row.label === "乙");
+  assert.equal(jia?.cohesion, 4);
+  assert.equal(yi?.cohesion, 0);
+  assert.equal(spacing.separations[0]?.mean, 4);
+  const text = formatPopulationSpacing(spacing);
+  assert.match(text, /距离按最远的一组缩放到 1/);
+  assert.match(text, /乙  内聚 0\.000/);
+  assert.match(text, /甲  内聚 1\.000/);
+  assert.match(text, /甲 和 乙，1\.000/);
+  assert.equal(text.includes("从近到远"), false);
+});
+
+const still = { approach: 0, coexist: 0, follow: 0, flee: 0 };
+
+function park(world: World, id: string, x: number, y = 0): void {
+  const entity = world.entities.get(id);
+  if (!entity) throw new Error(`没有 ${id}`);
+  entity.attrs.x = x;
+  entity.attrs.y = y;
+}
+
+function spot(world: World, id: string): { x: number; y: number } {
+  const entity = listEntities(world).find((item) => item.id === id);
+  assert.equal(typeof entity?.attrs.x, "number");
+  assert.equal(typeof entity?.attrs.y, "number");
+  return { x: entity?.attrs.x as number, y: entity?.attrs.y as number };
+}
+
+function shift(from: { x: number; y: number }, toward: { x: number; y: number }, scale: number): { x: number; y: number } {
+  return {
+    x: from.x + (toward.x - from.x) * scale,
+    y: from.y + (toward.y - from.y) * scale,
+  };
+}
+
+function closeTo(actual: { x: number; y: number }, expected: { x: number; y: number }): void {
+  assert.ok(Math.abs(actual.x - expected.x) < 1e-9);
+  assert.ok(Math.abs(actual.y - expected.y) < 1e-9);
+}
 
 function played(world: World, from: string, to: string): string | undefined {
   const relation = listRelations(world).find((row) => row.from === from && row.to === to);

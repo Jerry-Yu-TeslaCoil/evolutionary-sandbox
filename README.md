@@ -17,11 +17,11 @@ npm install
 npm start
 npm start -- --ticks 12 --every 5 --eliminate 8 --count 3 --seed 1
 npm start -- --n 1=5 --n 13=5
-npm start -- --world demo
+npm start -- --approach 0.2 --coexist 0 --follow 0.15 --flee 0.45
 npm test
 ```
 
-`npm start` 跑以牙还牙。`--world demo` 跑原来的三个人。类别编号和初始人数见 `src/tft.ts` 里的 `defaultTftParams`。
+`npm start` 跑以牙还牙。每人开局有随机坐标。每一拍只和当时最近的一部分人打，比例用 --near，默认 1/3，名额向下取整；对方把自己算进名额时也会打。合作时按靠近系数走近，互相背叛时按共存系数走近，单方面背叛时被背叛的人按远离系数走开，背叛的人按跟随系数走近。系数可以为负，负数表示方向相反。每次繁衍淘汰时，把存活者平移、缩放到离中心最远的人为 1，新生儿出现在亲代旁边。爆发者回看的次数和其中的背叛次数用 --window 和 --strikes，默认 5 和 3。结尾把种群距离按最远的一组缩放到 1，每种策略一行。类别编号和初始人数见 `src/tft.ts` 里的 `defaultTftParams`。
 
 ## 写一个策略
 
