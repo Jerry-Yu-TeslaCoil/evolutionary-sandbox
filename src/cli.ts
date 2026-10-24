@@ -15,6 +15,7 @@ interface Options {
   follow?: number;
   flee?: number;
   near?: number;
+  stray?: number;
   window?: number;
   strikes?: number;
   overrides: { key: string; count: number }[];
@@ -34,14 +35,15 @@ function parseOptions(argv: string[]): Options {
         "  npm start -- --flip 0.05",
         "  npm start -- --dead 0.05",
         "  npm start -- --approach 0.2 --coexist 0 --follow 0.15 --flee 0.45",
-        "  npm start -- --near 1/3",
+        "  npm start -- --near 1/3 --stray 0",
         "  npm start -- --window 5 --strikes 3",
         "",
         "--ratio 是同质化的判断比例，取 0 到 1，也可以写成分数。合作占比达到它才合作。越低越乐观，越高越悲观。默认 0.5。",
         "--flip 是每个出牌决定被翻转的概率，取 0 到 1，也可以写成分数。默认 0。",
         "--dead 是分数死区，取 0 到 1，也可以写成分数。繁衍那一拍最高分减最低分不超过最高分的这个比例，就当作分数相同并提前结束。默认 0。",
         "--approach、--coexist、--follow、--flee 是位置系数，可以是负数。正数沿原来的方向走，负数反过来。默认靠近 0.2、共存 0、跟随 0.15、远离 0.45。",
-        "--near 是每人挑选的最近对手占其他人的比例，取 0 到 1，也可以写成分数。名额向下取整，为 0 时这一拍不打。默认 1/3。",
+        "--near 是每人挑选的最近对手占其他人的比例，取 0 到 1，也可以写成分数。名额向下取整。默认 1/3。",
+        "--stray 是意外相遇：从最近名额剩下的对手里再随机抽的比例，取 0 到 1，也可以写成分数。名额向下取整，抽到的人不管远近。只要有一方抽到对方，两人就打。默认 0。",
         "--window 是爆发者回看的最近次数，--strikes 是其中要达到的背叛次数。都是正整数，背叛次数不能大于回看次数。默认 5 和 3。",
         "",
         "类别从 1 开始，也可以写 id：",
@@ -105,6 +107,10 @@ function parseOptions(argv: string[]): Options {
     }
     if (arg === "--near" || arg?.startsWith("--near=")) {
       options.near = unitArg(read("--near"), "--near");
+      continue;
+    }
+    if (arg === "--stray" || arg?.startsWith("--stray=")) {
+      options.stray = unitArg(read("--stray"), "--stray");
       continue;
     }
     if (arg === "--window" || arg?.startsWith("--window=")) {
@@ -188,6 +194,7 @@ function tftParams(options: Options): TftParams {
     follow: options.follow ?? defaultTftParams.follow,
     flee: options.flee ?? defaultTftParams.flee,
     near: options.near ?? defaultTftParams.near,
+    stray: options.stray ?? defaultTftParams.stray,
     window: options.window ?? defaultTftParams.window,
     strikes: options.strikes ?? defaultTftParams.strikes,
   };

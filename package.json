@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --import tsx src/cli.ts",
+    "viz": "node --import tsx src/viz.ts",
     "test": "tsc --noEmit && node --import tsx --test src/world.test.ts src/tft.test.ts",
     "check": "tsc --noEmit"
   },

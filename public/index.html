@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>以牙还牙</title>
+  <link rel="stylesheet" href="/view.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>以牙还牙</h1>
+      <p id="status">正在连接。</p>
+    </div>
+    <div class="buttons">
+      <button id="start" type="button">开始</button>
+      <button id="pause" type="button" disabled>暂停</button>
+      <button id="stop" type="button" disabled>停止</button>
+    </div>
+  </header>
+  <main>
+    <form id="params">
+      <p id="error" hidden></p>
+      <fieldset id="run-fields">
+        <legend>运行</legend>
+        <div id="scalars" class="grid"></div>
+      </fieldset>
+      <fieldset id="count-fields">
+        <legend>初始人数</legend>
+        <div id="counts" class="grid"></div>
+      </fieldset>
+    </form>
+    <section class="stage">
+      <figure>
+        <figcaption>
+          <span>地图</span>
+          <span class="map-tools">
+            <span id="map-note"></span>
+            <button type="button" id="map-core" class="active">主体</button>
+            <button type="button" id="map-all">全图</button>
+          </span>
+        </figcaption>
+        <canvas id="map" title="滚轮缩放，拖动平移，双击回到取景"></canvas>
+      </figure>
+      <figure>
+        <figcaption>种群占比</figcaption>
+        <canvas id="pie"></canvas>
+      </figure>
+    </section>
+  </main>
+  <script src="/view.js"></script>
+</body>
+</html>

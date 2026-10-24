@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { birthReach, createTftWorld, defaultTftParams, flipMove, formatPopulationSpacing, moveOf, nearestCount, normalizePositions, populationSpacing, rankCounts, rememberCounts, sameScoresAtSelection, spreadWeights, tftRankingNote } from "./tft.ts";
+import { birthReach, createTftWorld, defaultTftParams, flipMove, formatPopulationSpacing, moveOf, nearestCount, normalizePositions, normalizeTftParams, populationSpacing, rankCounts, rememberCounts, sameScoresAtSelection, spreadWeights, strayCount, tftRankingNote } from "./tft.ts";
 import { listEntities, listRelations, step, type World } from "./world.ts";
 
 test("常见出法按各自的规则决定下一手", () => {
@@ -277,6 +277,7 @@ test("结论排名写上这次运行的参数", () => {
   assert.match(mixed, /0\.05 的概率/);
   assert.match(mixed, /分数死区是最高分的 0\.05/);
   assert.match(mixed, /最近对手的比例是 0\.333333/);
+  assert.match(mixed, /意外相遇再从剩下的人里随机抽 0/);
   assert.match(mixed, /计划跑 30 拍，排名取第 10 拍开始时的人数/);
 
   const even = tftRankingNote(defaultTftParams, 12, 12);
@@ -285,6 +286,7 @@ test("结论排名写上这次运行的参数", () => {
   assert.match(even, /0 的概率/);
   assert.match(even, /分数死区是最高分的 0/);
   assert.match(even, /最近对手的比例是 0\.333333/);
+  assert.match(even, /意外相遇再从剩下的人里随机抽 0/);
   assert.match(even, /最近 5 次里被背叛达到 3 次/);
 });
 
@@ -557,6 +559,63 @@ test("每人只和最近的一部分人打，名额向下取整，对方算进�
   assert.equal(played(world, "alwaysCooperate#2", "alwaysCooperate#3"), "C");
   assert.equal(played(world, "alwaysCooperate#1", "alwaysCooperate#3"), undefined);
   assert.equal(played(world, "alwaysCooperate#1", "alwaysCooperate#4"), undefined);
+});
+
+test("意外相遇从最近名额剩下的人里随机抽，远近不管", () => {
+  assert.equal(strayCount(4, 1 / 3, 0), 0);
+  assert.equal(strayCount(4, 1 / 3, 1 / 2), 1);
+  assert.equal(strayCount(4, 1 / 3, 1), 2);
+  assert.equal(strayCount(4, 1, 1), 0);
+  assert.equal(strayCount(5, 0, 1 / 2), 2);
+  assert.throws(() => normalizeTftParams({ ...defaultTftParams, stray: 1.2 }), /意外相遇的比例/);
+
+  const meet = (stray: number, seed: number) => {
+    const world = createTftWorld({
+      counts: { alwaysCooperate: 4 },
+      every: 10,
+      eliminate: 1,
+      seed,
+      near: 1 / 3,
+      stray,
+      ...still,
+    });
+    park(world, "alwaysCooperate#1", 0);
+    park(world, "alwaysCooperate#2", 1);
+    park(world, "alwaysCooperate#3", 3);
+    park(world, "alwaysCooperate#4", 100);
+    step(world);
+    return world;
+  };
+
+  const quiet = meet(0, 1);
+  assert.equal(played(quiet, "alwaysCooperate#1", "alwaysCooperate#2"), "C");
+  assert.equal(played(quiet, "alwaysCooperate#1", "alwaysCooperate#3"), undefined);
+  assert.equal(played(quiet, "alwaysCooperate#1", "alwaysCooperate#4"), undefined);
+
+  const everyone = meet(1, 1);
+  assert.equal(played(everyone, "alwaysCooperate#1", "alwaysCooperate#4"), "C");
+
+  const pairsOf = (world: World) =>
+    ["alwaysCooperate#2", "alwaysCooperate#3", "alwaysCooperate#4"]
+      .filter((id) => played(world, "alwaysCooperate#1", id) !== undefined)
+      .join(",");
+  const first = pairsOf(meet(1 / 2, 1));
+  assert.equal(pairsOf(meet(1 / 2, 1)), first);
+
+  let sawFar = false;
+  let sawCloser = false;
+  const seen = new Set<string>();
+  for (let seed = 1; seed <= 40; seed += 1) {
+    const world = meet(1 / 2, seed);
+    const far = played(world, "alwaysCooperate#1", "alwaysCooperate#4") !== undefined;
+    const closer = played(world, "alwaysCooperate#1", "alwaysCooperate#3") !== undefined;
+    if (far && !closer) sawFar = true;
+    if (closer && !far) sawCloser = true;
+    seen.add(`${far}-${closer}`);
+  }
+  assert.equal(sawFar, true);
+  assert.equal(sawCloser, true);
+  assert.ok(seen.size > 1);
 });
 
 test("内聚是种群内部的平均距离，种群之间另算", () => {
